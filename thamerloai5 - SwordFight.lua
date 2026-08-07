@@ -1060,8 +1060,15 @@ task.spawn(function()
             if #tools > lastToolCount then
                 if CONFIG.GRAB_TOOL_MESHES then
                     local newTool = tools[#tools]
-                    dynamicSwordName = newTool.Name
-                    SayBubble("Got a new tool!", Enum.ChatColor.Green)
+                    local lowerName = string.lower(newTool.Name)
+                    -- Ignore default swords like "LinkedSword" so it doesn't announce them as new
+                    if lowerName ~= "linkedsword" and lowerName ~= string.lower(CONFIG.SWORD_NAME) then
+                        dynamicSwordName = newTool.Name
+                        SayBubble("Got a new tool!", Enum.ChatColor.Green)
+                    else
+                        -- If it picked up the default sword, reset the dynamic name to default
+                        dynamicSwordName = CONFIG.SWORD_NAME
+                    end
                 end
             end
             lastToolCount = #tools
