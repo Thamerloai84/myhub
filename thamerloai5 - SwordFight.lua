@@ -27,6 +27,7 @@ Features:
  - Tool Mesh Scavenger (Finds and equips tools from workspace["Tool Meshes"])
  - Limb Targeting (Attacks closest limb first instead of the back to beat ping)
  - Dynamic Healing Pad Detection (Scans workspace["Healing Pads"] for TouchInterest)
+ - Maximized Difficulty
 
 ]]
 local CONFIG = {
@@ -51,7 +52,7 @@ local CONFIG = {
     -- agents to tick per frame
     PATHFIND_SPEED = 100,
     -- player hit prediction via velocity
-    PREDICT_PLAYER_HIT = 0.175,
+    PREDICT_PLAYER_HIT = 0.25,
     PREDICT_PLAYER_DIST = 12,
     -- use predefs when theres no path found (usually cheating)
     USE_PREDEFS_ON_NOPATH = false,
@@ -1190,7 +1191,7 @@ task.spawn(function()
                     if haveSword then
                         DebugLines[3] = "SWORD EQUIPPED"
                         if sword.Parent == back then sword.Parent = char end
-                        if useSword or math.random() < 0.1 * dt then
+                        if useSword then
                             DebugLines[3] = "SWORD ACTIVATED"
                             sword.Enabled = true
                             sword:Activate()
@@ -1372,11 +1373,11 @@ task.spawn(function()
             hum:Move(moveDir)
             if CONFIG.PATCH_HUMANOID_MOVE_QUIRKS and not onLadder then
                 local vel = root.Velocity
-                local tvel = (moveDir * VEC3XZ * hum.WalkSpeed) + (groundVel * VEC3XZ) + Vector3.yAxis * vel.Y
+                local tvel = (moveDir * VEC3XZ * (hum.WalkSpeed + 4)) + (groundVel * VEC3XZ) + Vector3.yAxis * vel.Y
                 if onGround then
-                    vel = tvel:Lerp(vel, math.exp(-16 * dt))
+                    vel = tvel:Lerp(vel, math.exp(-22 * dt))
                 else
-                    vel = tvel:Lerp(vel, math.exp(-2 * dt))
+                    vel = tvel:Lerp(vel, math.exp(-4 * dt))
                 end
                 if IsSafe(vel) then
                     root.Velocity = vel
@@ -1463,71 +1464,47 @@ local Playstyles = {
             local voff = victim.Velocity * CONFIG.PREDICT_PLAYER_HIT * VEC3XZ
             vpos += voff
         end
-        if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
-            charge = true
-        end
+        if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then charge = true end
         local closest = 1.0
-        if victim.Position.Y < mePos.Y - 0.5 then
-            closest = 2.0
-        end
-        if dist > 9 then
-            targetLook = vpos
-        else
-            targetLook = limbPos
-        end
+        if victim.Position.Y < mePos.Y - 0.5 then closest = 2.0 end
+        if dist > 9 then targetLook = vpos else targetLook = limbPos end
         local lookYDist = (targetLook - mePos).Magnitude
-        if lookYDist > 1.5 then
-            targetLookY = math.atan(1.5 / lookYDist)
-        else
-            targetLookY = math.pi * 0.5
-        end
+        if lookYDist > 1.5 then targetLookY = math.atan(1.5 / lookYDist) else targetLookY = math.pi * 0.5 end
         local goingTo = -victim.Velocity.Unit:Dot(vcf.LookVector)
         local goingToR = victim.Velocity.Unit:Dot(vcf.RightVector)
         local swordDir = victimCF:VectorToWorldSpace(Vector3.new(1.5, 0, -1.2).Unit)
         local vdist = ((vpos - mePos) * VEC3XZ).Magnitude
         targetJump = victim.Velocity.Y > 10
         
-        local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
-        if dist < 6 and victimLookingAtMe then
-            if math.random() < 0.3 then targetJump = true end
-            local dodgeDir = math.random() > 0.5 and 5 or -5
-            targetMove = mePosGround - vcf.LookVector * 3 + vcf.RightVector * dodgeDir
+        -- 100% Dodge Logic
+        local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.4
+        if dist < 8 and victimLookingAtMe then
+            if math.random() < 0.8 then targetJump = true end
+            local dodgeDir = math.random() > 0.5 and 6 or -6
+            targetMove = mePosGround - vcf.LookVector * 2.5 + vcf.RightVector * dodgeDir
             if not CheckGround(targetMove) then
-                targetMove = mePosGround - vcf.LookVector * 3
+                targetMove = mePosGround - vcf.LookVector * 4
             end
         elseif victim.Velocity.Magnitude > 1 and CheckWalkable(mePosGround, victimPos) then
             local tight = 0
             for _,v in CARDINALS do
-                if CheckGround(victimPos + v * 3) then
-                    tight += 1
-                    CreateLocator(DebugBrain, victimPos + v * 3)
-                end
+                if CheckGround(victimPos + v * 3) then tight += 1 end
             end
             if tight > 5 then
-                DebugLines[7] = "PLAYSTYLE: CURRENTLY IN BATTLE"
                 targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe, 0, backoff))
                 if not CheckGround(targetMove * VEC3XZ + mePosGround * Vector3.yAxis) then
                     charge = true
                     strafe2 = 0
-                    DebugLines[7] = "PLAYSTYLE: CHARGING, AREA TOO SMALL"
                 end
                 if goingTo > 0.7 then
                     charge = true
-                    if vcf.RightVector:Dot(swordDir) + goingToR * 2 > 0 then
-                        strafe2 = -2
-                    else
-                        strafe2 = 2
-                    end
-                    if math.abs(goingToR) > 0.7 then
-                        closest = 3
-                    end
-                    DebugLines[7] = "PLAYSTYLE: CHARGING, COMING AT ME"
+                    if vcf.RightVector:Dot(swordDir) + goingToR * 2 > 0 then strafe2 = -2 else strafe2 = 2 end
+                    if math.abs(goingToR) > 0.7 then closest = 3 end
                 end
                 if goingTo < -0.55 then
                     charge = true
                     strafe2 = 0
                     closest = 1.0
-                    DebugLines[7] = "PLAYSTYLE: CHARGING, RUNNING AWAY"
                 end
                 if charge then
                     if vdist > CONFIG.CHARGE_NO_JUMP_DIST or goingTo > 0.8 then
@@ -1539,24 +1516,15 @@ local Playstyles = {
                     targetMove = limbPos
                 end
             else
-                DebugLines[7] = "PLAYSTYLE: CURRENTLY IN 2 STUD FLOOR BATTLE"
                 targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(0, 0, backoff))
-                if goingTo > 0.7 then
-                    charge = true
-                    DebugLines[7] = "PLAYSTYLE: CHARGING, COMING AT ME"
-                end
+                if goingTo > 0.7 then charge = true end
                 if charge then
-                    if vdist > 6 + goingTo * 4 and dist > 3 then
-                        targetJump = true
-                    end
+                    if vdist > 6 + goingTo * 4 and dist > 3 then targetJump = true end
                     targetMove = limbPos
                 end
             end
         else
-            DebugLines[7] = "PLAYSTYLE: NON-MOVING TARGET"
-            if vdist > CONFIG.CHARGE_NO_JUMP_DIST or goingTo > 0.8 then
-                targetJump = true
-            end
+            if vdist > CONFIG.CHARGE_NO_JUMP_DIST or goingTo > 0.8 then targetJump = true end
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
         end
         local isSpamJumping = victim.Velocity.Y > 12
@@ -1572,53 +1540,41 @@ local Playstyles = {
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
         local limbPos = GetClosestLimbPos(victim, mePos)
         local vpos = limbPos + (victim.Velocity * CONFIG.PREDICT_PLAYER_HIT)
-        if dist <= 5 then
-            vpos = limbPos
-        end
-        if dist < 14 and dist > 5.5 then
-            targetJump = true
-        end
-        if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
-            charge = true
-        end
+        if dist <= 5 then vpos = limbPos end
+        if dist < 14 and dist > 5.5 then targetJump = true end
+        if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then charge = true end
         local diff = (victim.Position - root.Position) * VEC3XZ
         local currentDist = diff.Magnitude
         targetLook = vpos
         local lookat = CFrame.lookAlong(Vector3.zero, (limbPos - root.Position) * VEC3XZ)
         local lookat2 = CFrame.lookAlong(Vector3.zero, (victim.Position - root.Position) * VEC3XZ)
         
-        local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
-        if dist < 6 and victimLookingAtMe then
-            if math.random() < 0.3 then targetJump = true end
-            local dodgeDir = math.random() > 0.5 and 5 or -5
-            targetMove = mePosGround - lookat.LookVector * 3 + lookat.RightVector * dodgeDir
+        -- 100% Dodge Logic
+        local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.4
+        if dist < 8 and victimLookingAtMe then
+            if math.random() < 0.8 then targetJump = true end
+            local dodgeDir = math.random() > 0.5 and 6 or -6
+            targetMove = mePosGround - lookat.LookVector * 2.5 + lookat.RightVector * dodgeDir
             if not CheckGround(targetMove) then
-                targetMove = mePosGround - lookat.LookVector * 3
+                targetMove = mePosGround - lookat.LookVector * 4
             end
         elseif victim.Velocity.Magnitude > 0.2 and CheckWalkable(mePosGround, victimPos) then
             if charge then
                 targetJump = true
                 if currentDist >= 4 then
-                    DebugLines[7] = "PLAYSTYLE: CHARGING WITH BIG STRAFE"
                     targetMove = limbPos
                 else
-                    DebugLines[7] = "PLAYSTYLE: CHARGING WITH STRICT MOVETO"
                     targetMove = limbPos
                 end
                 targetLookY = math.pi * 0.45 * (math.random() - 0.45)
             else
-                DebugLines[7] = "PLAYSTYLE: CHARGING, COMING AT ME"
                 targetMove = vpos + lookat:VectorToWorldSpace(Vector3.new(strafe2, 0, 21.8))
             end
         else
-            DebugLines[7] = "PLAYSTYLE: NON-MOVING TARGET"
             targetMove = vpos + lookat:VectorToWorldSpace(Vector3.new(0, 0, 2.5))
             targetLookY = math.pi * 0.1 * (math.random() - 0.1)
         end
-        CreateLocator(DebugBrain, targetMove)
-        targetLookY = math.pi * 0.05
         if not CheckGround(targetMove, Vector3.new(0, -5, 0)) then
-            DebugLines[7] = "PLAYSTYLE: MY MOVE TARGET LEADS TO A CLIFF"
             targetMove = vpos + lookat:VectorToWorldSpace(Vector3.new(0, 0, 2))
         end
         local isSpamJumping = victim.Velocity.Y > 12
@@ -1638,37 +1594,26 @@ local Playstyles = {
             local voff = victim.Velocity * CONFIG.PREDICT_PLAYER_HIT * VEC3XZ
             vpos += voff
         end
-        if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
-            charge = true
-        end
+        if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then charge = true end
         local closest = 1.0
-        if victim.Position.Y < mePos.Y - 0.5 then
-            closest = 2.0
-        end
+        if victim.Position.Y < mePos.Y - 0.5 then closest = 2.0 end
         targetLook = limbPos
         local lookYDist = (targetLook - mePos).Magnitude
-        if lookYDist > 1.5 then
-            targetLookY = math.atan(1.5 / lookYDist)
-        else
-            targetLookY = math.pi * 0.5
-        end
+        if lookYDist > 1.5 then targetLookY = math.atan(1.5 / lookYDist) else targetLookY = math.pi * 0.5 end
         
-        local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
-        if dist < 6 and victimLookingAtMe then
-            if math.random() < 0.3 then targetJump = true end
-            local dodgeDir = math.random() > 0.5 and 5 or -5
-            targetMove = mePosGround - vcf.LookVector * 3 + vcf.RightVector * dodgeDir
+        -- 100% Dodge Logic
+        local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.4
+        if dist < 8 and victimLookingAtMe then
+            if math.random() < 0.8 then targetJump = true end
+            local dodgeDir = math.random() > 0.5 and 6 or -6
+            targetMove = mePosGround - vcf.LookVector * 2.5 + vcf.RightVector * dodgeDir
             if not CheckGround(targetMove) then
-                targetMove = mePosGround - vcf.LookVector * 3
+                targetMove = mePosGround - vcf.LookVector * 4
             end
         elseif charge then
-            if dist > CONFIG.CHARGE_NO_JUMP_DIST then
-                targetJump = true
-            end
-            DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING..."
+            if dist > CONFIG.CHARGE_NO_JUMP_DIST then targetJump = true end
             targetMove = limbPos
         else
-            DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING TO NON MOVING..."
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
         end
         local isSpamJumping = victim.Velocity.Y > 12
