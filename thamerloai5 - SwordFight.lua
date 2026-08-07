@@ -566,7 +566,7 @@ local function GetNearestHealingPad(pos)
     
     local nearestPad, nearestDist = nil, math.huge
     for _, part in ipairs(padsFolder:GetDescendants()) do
-        if part:IsA("BasePart") and (part:FindFirstChild("TouchInterest") or part:FindFirstChildWhichIsA("TouchTransmitter")) then
+        if part:IsA("BasePart") and part:FindFirstChild("TouchInterest") then
             local dist = ((part.Position - pos) * VEC3XZ).Magnitude
             if dist < nearestDist then
                 nearestDist = dist
