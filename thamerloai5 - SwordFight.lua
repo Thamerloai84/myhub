@@ -418,7 +418,7 @@ do
         if player == Player then
             player.CharacterAdded:Connect(function(character)
                 table.insert(Characters, character)
-            )
+            end)
             if player.Character then table.insert(Characters, player.Character) end
             return
         end
