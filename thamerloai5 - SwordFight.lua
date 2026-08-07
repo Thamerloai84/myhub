@@ -23,7 +23,8 @@ Features:
  - NO Hitbox Expanding (Only physical sword swings)
  - Active Dodging & Rotation in Combat
  - Massive Performance Optimizations (No lag during combat or pathfinding)
- - NEW: PC Tier Selection GUI (Adjusts settings based on your hardware)
+ - PC Tier Selection GUI (Adjusts settings based on your hardware)
+ - NEW: Tool Mesh Scavenger (Finds and equips tools from workspace["Tool Meshes"])
 
 ]]
 local CONFIG = {
@@ -70,7 +71,12 @@ local CONFIG = {
     AGGRESSIVE_MODE = true,
     -- Talking Mode (Enable/Disable Fake Legacy Bubble Chat)
     TALKING = true,
+    -- NEW: Tool Mesh Scavenger (Look for tools in workspace["Tool Meshes"] when idle)
+    GRAB_TOOL_MESHES = true,
 }
+
+-- Dynamic Sword Name (Will change when picking up new tools)
+local dynamicSwordName = CONFIG.SWORD_NAME
 
 local CARDINALS = {
     Vector3.xAxis, Vector3.zAxis, -Vector3.xAxis, -Vector3.zAxis,
@@ -236,7 +242,7 @@ local function ChangeChatState(newState, customMessages, color)
     end
 end
 
--- Updated GetTool to detect LinkedSword or any string with "Sword" in it
+-- Updated GetTool to detect the dynamic sword name, LinkedSword, or any string with "Sword" in it
 local function GetTool(char, back, name)
     if char and back then
         for _,v in char:GetChildren() do
@@ -537,6 +543,23 @@ local function IsTruss(part)
     local name = string.lower(part.Name)
     if string.find(name, "truss") or string.find(name, "climb") or string.find(name, "ladder") then return true end
     return false
+end
+
+-- NEW: Tool Mesh Finder
+local function GetNearestToolMesh(pos)
+    local meshesFolder = workspace:FindFirstChild("Tool Meshes")
+    if not meshesFolder then return nil end
+    local nearest, nearestDist = nil, math.huge
+    for _, part in ipairs(meshesFolder:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local dist = ((part.Position - pos) * VEC3XZ).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearest = part
+            end
+        end
+    end
+    return nearest and nearest.Position
 end
 
 local AINodes = {}
@@ -1004,6 +1027,35 @@ local function GetNearestCharacter(pos, dist)
     return nearest, nearestdist
 end
 
+-- NEW: Tool Pickup Detection
+local lastToolCount = 0
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local back = Player:FindFirstChildOfClass("Backpack")
+        local char = Player.Character
+        if back and char then
+            local tools = {}
+            for _, v in ipairs(back:GetChildren()) do
+                if v:IsA("Tool") then table.insert(tools, v) end
+            end
+            for _, v in ipairs(char:GetChildren()) do
+                if v:IsA("Tool") then table.insert(tools, v) end
+            end
+            if #tools > lastToolCount then
+                if CONFIG.GRAB_TOOL_MESHES then
+                    local newTool = tools[#tools]
+                    dynamicSwordName = newTool.Name
+                    SayBubble("Got a new tool!", Enum.ChatColor.Green)
+                end
+            end
+            lastToolCount = #tools
+        else
+            lastToolCount = 0
+        end
+    end
+end)
+
 local Difficulties = {
     { -- EASY
         REACH = 0,
@@ -1084,7 +1136,7 @@ task.spawn(function()
         local char = Player.Character
         local back = Player:FindFirstChildOfClass("Backpack")
         if char and back then
-            local sword = GetTool(char, back, CONFIG.SWORD_NAME)
+            local sword = GetTool(char, back, dynamicSwordName)
             if sword then
                 if haveSword and sword.Parent == back then
                     sword.Parent = char
@@ -1125,7 +1177,7 @@ task.spawn(function()
             -- R15 & R6 Support for Right Arm (Sword Grip)
             local rightArm = char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand")
             if rightArm then
-                local sword = GetTool(char, back, CONFIG.SWORD_NAME)
+                local sword = GetTool(char, back, dynamicSwordName)
                 if sword then
                     if haveSword then
                         DebugLines[3] = "SWORD EQUIPPED"
@@ -1698,10 +1750,19 @@ while true do
             idlePosition = nil
         end
         if not idlePosition then
-            local dir = CFrame.Angles(0, math.random() * math.pi * 2, 0).LookVector * math.random(10, 100)
-            local hit = PhysicsRaycast(root.Position + dir + Vector3.new(0, 512, 0), Vector3.new(0, -1024, 0))
-            if hit then
-                idlePosition = hit.Position
+            local toolMeshPos = nil
+            if CONFIG.GRAB_TOOL_MESHES then
+                toolMeshPos = GetNearestToolMesh(root.Position)
+            end
+            
+            if toolMeshPos then
+                idlePosition = toolMeshPos
+            else
+                local dir = CFrame.Angles(0, math.random() * math.pi * 2, 0).LookVector * math.random(10, 100)
+                local hit = PhysicsRaycast(root.Position + dir + Vector3.new(0, 512, 0), Vector3.new(0, -1024, 0))
+                if hit then
+                    idlePosition = hit.Position
+                end
             end
         end
         targetMove = idlePosition
@@ -1829,6 +1890,7 @@ while true do
         end
         if not hasDied then
             hasDied = true
+            dynamicSwordName = CONFIG.SWORD_NAME -- Reset tool to default on death
             if ChatState ~= "LAGGING" then
                 -- Fixed logic to strictly detect resetting before assuming opponent killed
                 if isResetting then
@@ -1874,7 +1936,7 @@ noPathEvent = function(goal)
         if CONFIG.USE_PREDEFS_ON_NOPATH then
             if #Hacking == 0 then return end
             local char, back, root, hum = Essentials()
-            local sword = GetTool(char, back, CONFIG.SWORD_NAME)
+            local sword = GetTool(char, back, dynamicSwordName)
             if char and sword then
                 overrideController = true
                 Hacking[math.random(#Hacking)](char, back, root, hum, sword, currentVictim)
