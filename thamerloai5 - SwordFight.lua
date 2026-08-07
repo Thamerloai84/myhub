@@ -23,7 +23,7 @@ Features:
  - NO Hitbox Expanding (Only physical sword swings)
  - Active Dodging & Rotation in Combat
  - Massive Performance Optimizations (No lag during combat or pathfinding)
- - PC Tier Selection GUI (Adjusts settings based on your hardware)
+ - Mid-Fight PC Tier Toggle GUI
  - Tool Mesh Scavenger (Finds and equips tools from workspace["Tool Meshes"])
  - Limb Targeting (Attacks closest limb first instead of the back to beat ping)
  - Dynamic Healing Pad Detection (Scans workspace["Healing Pads"] for TouchInterest)
@@ -48,7 +48,7 @@ local CONFIG = {
     START_COMBAT = 40,
     -- nodes to walk per frame
     NODEWALK_SPEED = 50,
-    -- agents to tick per frame (Lowered to 100 to prevent script exhaustion/lag)
+    -- agents to tick per frame
     PATHFIND_SPEED = 100,
     -- player hit prediction via velocity
     PREDICT_PLAYER_HIT = 0.175,
@@ -72,6 +72,9 @@ local CONFIG = {
     GRAB_TOOL_MESHES = true,
 }
 
+-- Fallback for executors that don't support replicatesignal
+if not replicatesignal then replicatesignal = function(sig) warn("replicatesignal not supported on this executor") end end
+
 -- Dynamic Sword Name (Will change when picking up new tools)
 local dynamicSwordName = CONFIG.SWORD_NAME
 
@@ -90,87 +93,94 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Player = Players.LocalPlayer
 
--- [PC TIER SELECTION GUI]
-local selectedTier = nil
+-- [MID-FIGHT PC TIER TOGGLE GUI]
+local function ApplyPCTier(tier)
+    if tier == "WEAK" then
+        CONFIG.PATHFIND_SPEED = 50
+        CONFIG.NODEWALK_SPEED = 20
+        CONFIG.DEBUG = false
+        CONFIG.DEBUG_NODEWALKER = false
+        CONFIG.DEBUG_PATHFIND_OPEN = false
+    else
+        CONFIG.PATHFIND_SPEED = 200
+        CONFIG.NODEWALK_SPEED = 50
+        CONFIG.DEBUG = true
+        CONFIG.DEBUG_NODEWALKER = true
+        CONFIG.DEBUG_PATHFIND_OPEN = true
+    end
+end
+
 do
     local PlayerGui = Player:WaitForChild("PlayerGui")
-    local StartGui = Instance.new("ScreenGui")
-    StartGui.Name = "PCTierGui"
-    StartGui.Parent = PlayerGui
-    StartGui.ResetOnSpawn = false
+    local ToggleGui = Instance.new("ScreenGui")
+    ToggleGui.Name = "PCTierToggleGui"
+    ToggleGui.Parent = PlayerGui
+    ToggleGui.ResetOnSpawn = false
 
     local MainFrame = Instance.new("Frame")
-    MainFrame.Size = UDim2.new(0, 450, 0, 320)
-    MainFrame.Position = UDim2.new(0.5, -225, 0.5, -160)
+    MainFrame.Size = UDim2.new(0, 130, 0, 70)
+    MainFrame.Position = UDim2.new(0, 10, 0.5, -35)
     MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
     MainFrame.BorderSizePixel = 0
-    MainFrame.Parent = StartGui
-
+    MainFrame.Parent = ToggleGui
     local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 12)
+    UICorner.CornerRadius = UDim.new(0, 8)
     UICorner.Parent = MainFrame
 
     local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, 0, 0, 50)
-    Title.Position = UDim2.new(0, 0, 0, 10)
+    Title.Size = UDim2.new(1, 0, 0, 20)
     Title.BackgroundTransparency = 1
-    Title.Text = "SELECT YOUR PC TIER"
+    Title.Text = "PC TIER"
     Title.TextColor3 = Color3.new(1, 1, 1)
     Title.Font = Enum.Font.GothamBold
-    Title.TextSize = 24
+    Title.TextSize = 14
     Title.Parent = MainFrame
 
     local BeefyBtn = Instance.new("TextButton")
-    BeefyBtn.Size = UDim2.new(0.45, 0, 0, 220)
-    BeefyBtn.Position = UDim2.new(0.025, 0, 0, 70)
-    BeefyBtn.BackgroundColor3 = Color3.fromRGB(45, 100, 45)
-    BeefyBtn.Text = "🚀 Beefy PC\n\nCPU: i7/Ryzen 7+\nRAM: 16GB+\nGPU: RTX Series"
+    BeefyBtn.Size = UDim2.new(0.45, 0, 0, 35)
+    BeefyBtn.Position = UDim2.new(0.05, 0, 0, 30)
+    BeefyBtn.Text = "Beefy"
     BeefyBtn.TextColor3 = Color3.new(1, 1, 1)
     BeefyBtn.Font = Enum.Font.GothamBold
-    BeefyBtn.TextSize = 16
+    BeefyBtn.TextSize = 12
     BeefyBtn.Parent = MainFrame
     local b1Corner = Instance.new("UICorner")
-    b1Corner.CornerRadius = UDim.new(0, 8)
+    b1Corner.CornerRadius = UDim.new(0, 6)
     b1Corner.Parent = BeefyBtn
 
     local WeakBtn = Instance.new("TextButton")
-    WeakBtn.Size = UDim2.new(0.45, 0, 0, 220)
-    WeakBtn.Position = UDim2.new(0.525, 0, 0, 70)
-    WeakBtn.BackgroundColor3 = Color3.fromRGB(100, 80, 40)
-    WeakBtn.Text = "🐢 Non-Beefy PC\n\nCPU: i3/Ryzen 3\nRAM: 4-8GB\nGPU: Integrated/Basic"
+    WeakBtn.Size = UDim2.new(0.45, 0, 0, 35)
+    WeakBtn.Position = UDim2.new(0.5, 0, 0, 30)
+    WeakBtn.Text = "Non-Beefy"
     WeakBtn.TextColor3 = Color3.new(1, 1, 1)
     WeakBtn.Font = Enum.Font.GothamBold
-    WeakBtn.TextSize = 16
+    WeakBtn.TextSize = 12
     WeakBtn.Parent = MainFrame
     local b2Corner = Instance.new("UICorner")
-    b2Corner.CornerRadius = UDim.new(0, 8)
+    b2Corner.CornerRadius = UDim.new(0, 6)
     b2Corner.Parent = WeakBtn
 
+    local function UpdateGuiColors()
+        if CONFIG.PATHFIND_SPEED > 50 then
+            BeefyBtn.BackgroundColor3 = Color3.fromRGB(45, 100, 45)
+            WeakBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        else
+            BeefyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            WeakBtn.BackgroundColor3 = Color3.fromRGB(100, 80, 40)
+        end
+    end
+
     BeefyBtn.MouseButton1Click:Connect(function()
-        selectedTier = "BEEFY"
-        StartGui:Destroy()
+        ApplyPCTier("BEEFY")
+        UpdateGuiColors()
     end)
     WeakBtn.MouseButton1Click:Connect(function()
-        selectedTier = "WEAK"
-        StartGui:Destroy()
+        ApplyPCTier("WEAK")
+        UpdateGuiColors()
     end)
-end
 
-repeat task.wait() until selectedTier ~= nil
-
--- Apply configurations based on PC tier
-if selectedTier == "WEAK" then
-    CONFIG.PATHFIND_SPEED = 50  -- Slower pathfinding to save CPU
-    CONFIG.NODEWALK_SPEED = 20  -- Slower node generation
-    CONFIG.DEBUG = false         -- Disable debug to save GPU and CPU
-    CONFIG.DEBUG_NODEWALKER = false
-    CONFIG.DEBUG_PATHFIND_OPEN = false
-else
-    CONFIG.PATHFIND_SPEED = 200 -- Max speed pathfinding
-    CONFIG.NODEWALK_SPEED = 50  -- Max speed node generation
-    CONFIG.DEBUG = true          -- Enable debug
-    CONFIG.DEBUG_NODEWALKER = true
-    CONFIG.DEBUG_PATHFIND_OPEN = true
+    ApplyPCTier("BEEFY")
+    UpdateGuiColors()
 end
 
 -- Lag Detection (FPS Tracker)
@@ -512,7 +522,6 @@ end
 local function CheckGround(pos, dir)
     return PhysicsCheckLine(pos, 0.6, dir or Vector3.new(0, -5, 0))
 end
--- Optimized CheckWalkable (step increased to 2 to halve raycasts)
 local function CheckWalkable(a, b)
     a = EnsureGround(a)
     if not a then return false end
@@ -526,14 +535,13 @@ local function CheckWalkable(a, b)
     if not CheckGround(b) then return false end
     if PhysicsCheckLine(a + Vector3.new(0, 3, 0), 1.2, diff) then return false end
     local dir = diff.Unit
-    local step = 2 -- Optimized from 1 to 2
+    local step = 2
     for i=0, dist, step do
         if not CheckGround(a + dir * i) then return false end
     end
     return true
 end
 
--- Truss & Ladder Detection
 local function IsTruss(part)
     if not part then return false end
     if part:IsA("TrussPart") then return true end
@@ -542,7 +550,6 @@ local function IsTruss(part)
     return false
 end
 
--- NEW: Tool Mesh Finder
 local function GetNearestToolMesh(pos)
     local meshesFolder = workspace:FindFirstChild("Tool Meshes")
     if not meshesFolder then return nil end
@@ -559,7 +566,6 @@ local function GetNearestToolMesh(pos)
     return nearest and nearest.Position
 end
 
--- NEW: Dynamic Healing Pad Finder
 local function GetNearestHealingPad(pos)
     local padsFolder = workspace:FindFirstChild("Healing Pads")
     if not padsFolder then return nil, math.huge end
@@ -758,7 +764,6 @@ local function SummonNodeWalk(pos, dir, node)
     return false
 end
 
--- Truss Linking Logic
 local function CheckTruss(node, dir)
     local origin = node.Position + Vector3.new(0, 3, 0)
     local cast = PhysicsRaycast(origin, dir * 5)
@@ -1018,7 +1023,6 @@ end)
 Player.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable
 Player.DevTouchMovementMode = Enum.DevTouchMovementMode.Scriptable
 
--- Target caching to prevent lag
 local cachedVictim = nil
 local cachedDist = nil
 local cacheTimer = 0
@@ -1042,7 +1046,7 @@ local function GetNearestCharacter(pos, dist)
     return nearest, nearestdist
 end
 
--- NEW: Tool Pickup Detection
+-- Tool Pickup Detection
 local lastToolCount = 0
 task.spawn(function()
     while true do
@@ -1061,12 +1065,10 @@ task.spawn(function()
                 if CONFIG.GRAB_TOOL_MESHES then
                     local newTool = tools[#tools]
                     local lowerName = string.lower(newTool.Name)
-                    -- Ignore default swords like "LinkedSword" so it doesn't announce them as new
                     if lowerName ~= "linkedsword" and lowerName ~= string.lower(CONFIG.SWORD_NAME) then
                         dynamicSwordName = newTool.Name
                         SayBubble("Got a new tool!", Enum.ChatColor.Green)
                     else
-                        -- If it picked up the default sword, reset the dynamic name to default
                         dynamicSwordName = CONFIG.SWORD_NAME
                     end
                 end
@@ -1079,28 +1081,15 @@ task.spawn(function()
 end)
 
 local Difficulties = {
-    { -- EASY
-        REACH = 0,
-        EXTRASPEED = 0,
-    },
-    { -- MEDIUM
-        REACH = 1,
-        EXTRASPEED = 1,
-    },
-    { -- HARD
-        REACH = 3,
-        EXTRASPEED = 2,
-    },
+    { REACH = 0, EXTRASPEED = 0 },
+    { REACH = 1, EXTRASPEED = 1 },
+    { REACH = 3, EXTRASPEED = 2 },
 }
 local function GetDifficulty()
     local W, L = 300, 0
     if Player:FindFirstChild("leaderstats") then
-        if Player.leaderstats:FindFirstChild("KOs") then
-            W = Player.leaderstats.KOs.Value
-        end
-        if Player.leaderstats:FindFirstChild("Wipeouts") then
-            L = Player.leaderstats.Wipeouts.Value
-        end
+        if Player.leaderstats:FindFirstChild("KOs") then W = Player.leaderstats.KOs.Value end
+        if Player.leaderstats:FindFirstChild("Wipeouts") then L = Player.leaderstats.Wipeouts.Value end
     end
 end
 
@@ -1151,7 +1140,6 @@ local overrideController = false
 local noPathEvent = nil
 local hasDied = false
 
--- The 1 second sword detection & equipping loop requested
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1190,13 +1178,11 @@ task.spawn(function()
         end
         local char, back, hum, root = Essentials()
         if char then
-            -- R15 & R6 Support for Legs
             local lleg = char:FindFirstChild("Left Leg") or char:FindFirstChild("LeftFoot") or char:FindFirstChild("LeftLowerLeg")
             local rleg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
             if lleg then lleg.CanCollide = false end
             if rleg then rleg.CanCollide = false end
             
-            -- R15 & R6 Support for Right Arm (Sword Grip)
             local rightArm = char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand")
             if rightArm then
                 local sword = GetTool(char, back, dynamicSwordName)
@@ -1230,7 +1216,6 @@ task.spawn(function()
             local onLadder = hum:GetState() == Enum.HumanoidStateType.Climbing
             local onGround = hum:GetState() == Enum.HumanoidStateType.Running or onLadder
             
-            -- Ramp / Moving Ground Velocity Support
             local groundPos, groundPart = EnsureGround(root.Position, true)
             local mePos = groundPos or root.Position
             local groundVel = Vector3.zero
@@ -1249,7 +1234,6 @@ task.spawn(function()
                 CreateLocator(DebugController, targetMove)
                 local distToTarget = (targetMove - mePos).Magnitude
                 
-                -- Optimization: Skip CheckWalkable if in close combat to prevent lag
                 if distToTarget < 15 or CheckWalkable(mePos, targetMove) then
                     DebugLines[4] = "MOVE METHOD: MOVETO"
                     pathfinding2 = nil
@@ -1277,9 +1261,7 @@ task.spawn(function()
                     elseif pathfinding == "FORCE" or not pathfinding2 then
                         local pf = {}
                         pf.Start = mePos
-                        if pathfinding2 then
-                            pf.Start = moveToward
-                        end
+                        if pathfinding2 then pf.Start = moveToward end
                         pf.Goal = targetMove
                         pf.Index = 1
                         pf.Path = {}
@@ -1318,7 +1300,6 @@ task.spawn(function()
                         if path[pf.Index] and CheckGround(path[pf.Index].Position) then
                             DebugLines[4] = "METHOD: PATHFIND, PATHING, IDX = " .. pf.Index
                             moveToward = path[pf.Index].Position
-                            -- Truss climbing support
                             if moveToward.Y > mePos.Y + 6 and pf.Index > 1 then
                                 local isTrussInWay = false
                                 local horizontalDir = (moveToward - root.Position) * VEC3XZ
@@ -1341,16 +1322,8 @@ task.spawn(function()
                     CreateLocator(DebugController, moveToward + Vector3.new(0, 1, 0))
                     local diff = (moveToward - mePos) * VEC3XZ
                     if not IsSafe(diff) then diff = Vector3.zero end
-                    if onGround then
-                        diff *= 2
-                    else
-                        diff *= 0.8
-                    end
-                    if diff.Magnitude > 1 then
-                        moveDir = diff.Unit
-                    else
-                        moveDir = diff
-                    end
+                    if onGround then diff *= 2 else diff *= 0.8 end
+                    if diff.Magnitude > 1 then moveDir = diff.Unit else moveDir = diff end
                 end
             else
                 DebugLines[4] = "MOVE METHOD: I HAVE FALLEN AND I CANT GET UP"
@@ -1456,7 +1429,6 @@ task.spawn(function()
     end
 end)
 
--- NEW: Limb Targeting System
 local LIMB_NAMES = {
     "Right Arm", "Left Arm", "Right Leg", "Left Leg",
     "RightHand", "LeftHand", "RightFoot", "LeftFoot",
@@ -1484,7 +1456,6 @@ end
 local chargeJump = 0
 local Playstyles = {
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
-        -- Target the closest limb instead of the root
         local limbPos = GetClosestLimbPos(victim, mePos)
         local vpos = limbPos
         local vcf = CFrame.lookAlong(Vector3.zero, (limbPos - mePos) * VEC3XZ)
@@ -1495,7 +1466,7 @@ local Playstyles = {
         if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
             charge = true
         end
-        local closest = 1.0 -- Reduced from 1.5 to get closer and hit limbs first
+        local closest = 1.0
         if victim.Position.Y < mePos.Y - 0.5 then
             closest = 2.0
         end
@@ -1516,7 +1487,6 @@ local Playstyles = {
         local vdist = ((vpos - mePos) * VEC3XZ).Magnitude
         targetJump = victim.Velocity.Y > 10
         
-        -- Active Dodging Logic
         local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
         if dist < 6 and victimLookingAtMe then
             if math.random() < 0.3 then targetJump = true end
@@ -1566,7 +1536,6 @@ local Playstyles = {
                             targetJump = true
                         end
                     end
-                    -- Attack directly into the limb
                     targetMove = limbPos
                 end
             else
@@ -1580,7 +1549,6 @@ local Playstyles = {
                     if vdist > 6 + goingTo * 4 and dist > 3 then
                         targetJump = true
                     end
-                    -- Attack directly into the limb
                     targetMove = limbPos
                 end
             end
@@ -1591,20 +1559,17 @@ local Playstyles = {
             end
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
         end
-        -- Smart Combat Jumping
         local isSpamJumping = victim.Velocity.Y > 12
         local isVictimAbove = victim.Position.Y > mePos.Y + 2
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
             targetJump = isSpamJumping or isVictimAbove
         end
-        -- Swing earlier (hitDist < 3 instead of 2) to beat ping
         if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
             targetLookY += math.pi * 0.25 * (math.random() - 0.5) * 2
         end
     end,
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
-        -- Target the closest limb instead of the root
         local limbPos = GetClosestLimbPos(victim, mePos)
         local vpos = limbPos + (victim.Velocity * CONFIG.PREDICT_PLAYER_HIT)
         if dist <= 5 then
@@ -1622,7 +1587,6 @@ local Playstyles = {
         local lookat = CFrame.lookAlong(Vector3.zero, (limbPos - root.Position) * VEC3XZ)
         local lookat2 = CFrame.lookAlong(Vector3.zero, (victim.Position - root.Position) * VEC3XZ)
         
-        -- Active Dodging Logic
         local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
         if dist < 6 and victimLookingAtMe then
             if math.random() < 0.3 then targetJump = true end
@@ -1636,11 +1600,9 @@ local Playstyles = {
                 targetJump = true
                 if currentDist >= 4 then
                     DebugLines[7] = "PLAYSTYLE: CHARGING WITH BIG STRAFE"
-                    -- Attack directly into the limb
                     targetMove = limbPos
                 else
                     DebugLines[7] = "PLAYSTYLE: CHARGING WITH STRICT MOVETO"
-                    -- Attack directly into the limb
                     targetMove = limbPos
                 end
                 targetLookY = math.pi * 0.45 * (math.random() - 0.45)
@@ -1659,19 +1621,16 @@ local Playstyles = {
             DebugLines[7] = "PLAYSTYLE: MY MOVE TARGET LEADS TO A CLIFF"
             targetMove = vpos + lookat:VectorToWorldSpace(Vector3.new(0, 0, 2))
         end
-        -- Smart Combat Jumping
         local isSpamJumping = victim.Velocity.Y > 12
         local isVictimAbove = victim.Position.Y > mePos.Y + 2
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
             targetJump = isSpamJumping or isVictimAbove
         end
-        -- Swing earlier (hitDist < 3 instead of 2) to beat ping
         if dist < 8 + Player:GetNetworkPing() + CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
         end
     end,
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
-        -- Target the closest limb instead of the root
         local limbPos = GetClosestLimbPos(victim, mePos)
         local vpos = limbPos
         local vcf = CFrame.lookAlong(Vector3.zero, (limbPos - mePos) * VEC3XZ)
@@ -1694,7 +1653,6 @@ local Playstyles = {
             targetLookY = math.pi * 0.5
         end
         
-        -- Active Dodging Logic
         local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
         if dist < 6 and victimLookingAtMe then
             if math.random() < 0.3 then targetJump = true end
@@ -1708,19 +1666,16 @@ local Playstyles = {
                 targetJump = true
             end
             DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING..."
-            -- Attack directly into the limb
             targetMove = limbPos
         else
             DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING TO NON MOVING..."
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
         end
-        -- Smart Combat Jumping
         local isSpamJumping = victim.Velocity.Y > 12
         local isVictimAbove = victim.Position.Y > mePos.Y + 2
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
             targetJump = isSpamJumping or isVictimAbove
         end
-        -- Swing earlier (hitDist < 3 instead of 2) to beat ping
         if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
             targetLookY += math.pi * 0.25 * (math.random() - 0.5) * 2
@@ -1765,7 +1720,6 @@ local currentPlaystyleIndex = 0
 while true do
     local dt = task.wait()
     
-    -- Lag Detection chat system
     if currentFPS < 15 then
         if ChatState == "LAGGING" then
             LagTimer += dt
@@ -1842,7 +1796,6 @@ while true do
             end
         end
         
-        -- Win Detection (if our target died)
         if currentVictim then
             local vChar = currentVictim.Parent
             local vHum = vChar and vChar:FindFirstChildOfClass("Humanoid")
@@ -1868,7 +1821,6 @@ while true do
         
         local mePosGround = EnsureGround(mePos, true) or mePos
         
-        -- Optimize GetNearestCharacter to only run every 0.2s
         cacheTimer += dt
         if cacheTimer > 0.2 or not currentVictim then
             cacheTimer = 0
@@ -1909,7 +1861,6 @@ while true do
                 DebugLines[6] = "BRAIN: IN COMBAT, PLAYSTYLE " .. currentPlaystyleName
                 currentPlaystyle(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
                 
-                -- Chat state for combat
                 if ChatState ~= "LAGGING" then
                     if charge then
                         ChangeChatState("CHARGING", nil, Enum.ChatColor.Red)
@@ -1919,13 +1870,11 @@ while true do
                 end
             else
                 targetMove = victimPos
-                -- Chat state for pursuing
                 if ChatState ~= "LAGGING" then
                     ChangeChatState("PURSUING", nil, Enum.ChatColor.Green)
                 end
             end
         else
-            -- No victim
             if ChatState ~= "LAGGING" and ChatState ~= "WON" then
                 if idlePosition then
                     ChangeChatState("WALKING", nil, Enum.ChatColor.Green)
@@ -1943,9 +1892,8 @@ while true do
         end
         if not hasDied then
             hasDied = true
-            dynamicSwordName = CONFIG.SWORD_NAME -- Reset tool to default on death
+            dynamicSwordName = CONFIG.SWORD_NAME
             if ChatState ~= "LAGGING" then
-                -- Fixed logic to strictly detect resetting before assuming opponent killed
                 if isResetting then
                     ChangeChatState("RESETTING", nil, Enum.ChatColor.White)
                     isResetting = false
@@ -1973,7 +1921,6 @@ local Hacking = {
         if handle then
             task.wait(0.1)
             while GetNearestCharacter(victim.Position) == victim do
-                -- REMOVED firetouchinterest here too so reachkills are legit
                 sword.Enabled = true
                 sword:Activate()
                 task.wait()
