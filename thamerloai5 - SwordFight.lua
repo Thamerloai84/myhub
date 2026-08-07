@@ -24,7 +24,9 @@ Features:
  - Active Dodging & Rotation in Combat
  - Massive Performance Optimizations (No lag during combat or pathfinding)
  - PC Tier Selection GUI (Adjusts settings based on your hardware)
- - NEW: Tool Mesh Scavenger (Finds and equips tools from workspace["Tool Meshes"])
+ - Tool Mesh Scavenger (Finds and equips tools from workspace["Tool Meshes"])
+ - Limb Targeting (Attacks closest limb first instead of the back to beat ping)
+ - Dynamic Healing Pad Detection (Scans workspace["Healing Pads"] for TouchInterest)
 
 ]]
 local CONFIG = {
@@ -38,11 +40,6 @@ local CONFIG = {
     IMMEDIATE_ATTACK_RADIUS = 14,
     -- sword's internal name
     SWORD_NAME = "Sword",
-    -- healing pad positions
-    HEALING_PAD_POSITIONS = {
-        Vector3.new(-124, 256, 4),
-        Vector3.new(136, 247, 2),
-    },
     -- distance for sword to swing (Lowered to 5 for realistic sword range)
     DIST_SWING = 5,
     -- when charging, dont jump when below this distance
@@ -71,7 +68,7 @@ local CONFIG = {
     AGGRESSIVE_MODE = true,
     -- Talking Mode (Enable/Disable Fake Legacy Bubble Chat)
     TALKING = true,
-    -- NEW: Tool Mesh Scavenger (Look for tools in workspace["Tool Meshes"] when idle)
+    -- Tool Mesh Scavenger (Look for tools in workspace["Tool Meshes"] when idle)
     GRAB_TOOL_MESHES = true,
 }
 
@@ -421,7 +418,7 @@ do
         if player == Player then
             player.CharacterAdded:Connect(function(character)
                 table.insert(Characters, character)
-            end)
+            )
             if player.Character then table.insert(Characters, player.Character) end
             return
         end
@@ -560,6 +557,24 @@ local function GetNearestToolMesh(pos)
         end
     end
     return nearest and nearest.Position
+end
+
+-- NEW: Dynamic Healing Pad Finder
+local function GetNearestHealingPad(pos)
+    local padsFolder = workspace:FindFirstChild("Healing Pads")
+    if not padsFolder then return nil, math.huge end
+    
+    local nearestPad, nearestDist = nil, math.huge
+    for _, part in ipairs(padsFolder:GetDescendants()) do
+        if part:IsA("BasePart") and (part:FindFirstChild("TouchInterest") or part:FindFirstChildWhichIsA("TouchTransmitter")) then
+            local dist = ((part.Position - pos) * VEC3XZ).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearestPad = part
+            end
+        end
+    end
+    return nearestPad, nearestDist
 end
 
 local AINodes = {}
@@ -1434,11 +1449,38 @@ task.spawn(function()
     end
 end)
 
+-- NEW: Limb Targeting System
+local LIMB_NAMES = {
+    "Right Arm", "Left Arm", "Right Leg", "Left Leg",
+    "RightHand", "LeftHand", "RightFoot", "LeftFoot",
+    "RightLowerArm", "LeftLowerArm", "RightLowerLeg", "LeftLowerLeg",
+    "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart"
+}
+local function GetClosestLimbPos(victim, mePos)
+    local char = victim.Parent
+    if not char then return victim.Position end
+    local closestDist = math.huge
+    local bestPos = victim.Position
+    for _, name in ipairs(LIMB_NAMES) do
+        local part = char:FindFirstChild(name)
+        if part and part:IsA("BasePart") then
+            local d = (part.Position - mePos).Magnitude
+            if d < closestDist then
+                closestDist = d
+                bestPos = part.Position
+            end
+        end
+    end
+    return bestPos
+end
+
 local chargeJump = 0
 local Playstyles = {
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
-        local vpos = victimPos
-        local vcf = CFrame.lookAlong(Vector3.zero, (victimPos - mePos) * VEC3XZ)
+        -- Target the closest limb instead of the root
+        local limbPos = GetClosestLimbPos(victim, mePos)
+        local vpos = limbPos
+        local vcf = CFrame.lookAlong(Vector3.zero, (limbPos - mePos) * VEC3XZ)
         if dist > CONFIG.PREDICT_PLAYER_DIST and victim.Velocity.Magnitude > 1 then
             local voff = victim.Velocity * CONFIG.PREDICT_PLAYER_HIT * VEC3XZ
             vpos += voff
@@ -1446,14 +1488,14 @@ local Playstyles = {
         if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
             charge = true
         end
-        local closest = 1.5
+        local closest = 1.0 -- Reduced from 1.5 to get closer and hit limbs first
         if victim.Position.Y < mePos.Y - 0.5 then
-            closest = 2.5
+            closest = 2.0
         end
         if dist > 9 then
             targetLook = vpos
         else
-            targetLook = victimPos
+            targetLook = limbPos
         end
         local lookYDist = (targetLook - mePos).Magnitude
         if lookYDist > 1.5 then
@@ -1507,7 +1549,7 @@ local Playstyles = {
                 if goingTo < -0.55 then
                     charge = true
                     strafe2 = 0
-                    closest = 1.5
+                    closest = 1.0
                     DebugLines[7] = "PLAYSTYLE: CHARGING, RUNNING AWAY"
                 end
                 if charge then
@@ -1517,7 +1559,8 @@ local Playstyles = {
                             targetJump = true
                         end
                     end
-                    targetMove = mePosGround + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest - dist))
+                    -- Attack directly into the limb
+                    targetMove = limbPos
                 end
             else
                 DebugLines[7] = "PLAYSTYLE: CURRENTLY IN 2 STUD FLOOR BATTLE"
@@ -1530,7 +1573,8 @@ local Playstyles = {
                     if vdist > 6 + goingTo * 4 and dist > 3 then
                         targetJump = true
                     end
-                    targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(0, 0, closest))
+                    -- Attack directly into the limb
+                    targetMove = limbPos
                 end
             end
         else
@@ -1546,15 +1590,18 @@ local Playstyles = {
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
             targetJump = isSpamJumping or isVictimAbove
         end
-        if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 2 then
+        -- Swing earlier (hitDist < 3 instead of 2) to beat ping
+        if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
             targetLookY += math.pi * 0.25 * (math.random() - 0.5) * 2
         end
     end,
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
-        local vpos = victimPos + (victim.Velocity * CONFIG.PREDICT_PLAYER_HIT)
+        -- Target the closest limb instead of the root
+        local limbPos = GetClosestLimbPos(victim, mePos)
+        local vpos = limbPos + (victim.Velocity * CONFIG.PREDICT_PLAYER_HIT)
         if dist <= 5 then
-            vpos = victimPos
+            vpos = limbPos
         end
         if dist < 14 and dist > 5.5 then
             targetJump = true
@@ -1565,7 +1612,7 @@ local Playstyles = {
         local diff = (victim.Position - root.Position) * VEC3XZ
         local currentDist = diff.Magnitude
         targetLook = vpos
-        local lookat = CFrame.lookAlong(Vector3.zero, (vpos - root.Position) * VEC3XZ)
+        local lookat = CFrame.lookAlong(Vector3.zero, (limbPos - root.Position) * VEC3XZ)
         local lookat2 = CFrame.lookAlong(Vector3.zero, (victim.Position - root.Position) * VEC3XZ)
         
         -- Active Dodging Logic
@@ -1582,11 +1629,12 @@ local Playstyles = {
                 targetJump = true
                 if currentDist >= 4 then
                     DebugLines[7] = "PLAYSTYLE: CHARGING WITH BIG STRAFE"
-                    targetMove = vpos + lookat:VectorToWorldSpace(Vector3.new(3, 0, 2))
+                    -- Attack directly into the limb
+                    targetMove = limbPos
                 else
                     DebugLines[7] = "PLAYSTYLE: CHARGING WITH STRICT MOVETO"
-                    local strafe = lookat2:VectorToWorldSpace(Vector3.new(math.sin(tick() * 4) * 6, 0, -99))
-                    targetMove = vpos + strafe
+                    -- Attack directly into the limb
+                    targetMove = limbPos
                 end
                 targetLookY = math.pi * 0.45 * (math.random() - 0.45)
             else
@@ -1610,13 +1658,16 @@ local Playstyles = {
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
             targetJump = isSpamJumping or isVictimAbove
         end
-        if dist < 8 + Player:GetNetworkPing() + CONFIG.DIST_SWING then
+        -- Swing earlier (hitDist < 3 instead of 2) to beat ping
+        if dist < 8 + Player:GetNetworkPing() + CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
         end
     end,
     function(dt, hum, root, victim, dist, hitDist, mePos, mePosGround, victimPos, victimCF)
-        local vpos = victimPos
-        local vcf = CFrame.lookAlong(Vector3.zero, (victimPos - mePos) * VEC3XZ)
+        -- Target the closest limb instead of the root
+        local limbPos = GetClosestLimbPos(victim, mePos)
+        local vpos = limbPos
+        local vcf = CFrame.lookAlong(Vector3.zero, (limbPos - mePos) * VEC3XZ)
         if dist > CONFIG.PREDICT_PLAYER_DIST then
             local voff = victim.Velocity * CONFIG.PREDICT_PLAYER_HIT * VEC3XZ
             vpos += voff
@@ -1624,11 +1675,11 @@ local Playstyles = {
         if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
             charge = true
         end
-        local closest = 1.5
+        local closest = 1.0
         if victim.Position.Y < mePos.Y - 0.5 then
-            closest = 2.5
+            closest = 2.0
         end
-        targetLook = victimPos
+        targetLook = limbPos
         local lookYDist = (targetLook - mePos).Magnitude
         if lookYDist > 1.5 then
             targetLookY = math.atan(1.5 / lookYDist)
@@ -1650,7 +1701,8 @@ local Playstyles = {
                 targetJump = true
             end
             DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING..."
-            targetMove = mePosGround + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, -2))
+            -- Attack directly into the limb
+            targetMove = limbPos
         else
             DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING TO NON MOVING..."
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
@@ -1661,7 +1713,8 @@ local Playstyles = {
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
             targetJump = isSpamJumping or isVictimAbove
         end
-        if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 2 then
+        -- Swing earlier (hitDist < 3 instead of 2) to beat ping
+        if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
             targetLookY += math.pi * 0.25 * (math.random() - 0.5) * 2
         end
@@ -1749,17 +1802,18 @@ while true do
         if math.random() < 0.3 * dt then
             idlePosition = nil
         end
+        local mePos = root.Position
         if not idlePosition then
             local toolMeshPos = nil
             if CONFIG.GRAB_TOOL_MESHES then
-                toolMeshPos = GetNearestToolMesh(root.Position)
+                toolMeshPos = GetNearestToolMesh(mePos)
             end
             
             if toolMeshPos then
                 idlePosition = toolMeshPos
             else
                 local dir = CFrame.Angles(0, math.random() * math.pi * 2, 0).LookVector * math.random(10, 100)
-                local hit = PhysicsRaycast(root.Position + dir + Vector3.new(0, 512, 0), Vector3.new(0, -1024, 0))
+                local hit = PhysicsRaycast(mePos + dir + Vector3.new(0, 512, 0), Vector3.new(0, -1024, 0))
                 if hit then
                     idlePosition = hit.Position
                 end
@@ -1770,16 +1824,9 @@ while true do
         if CONFIG.ALLOW_HEALING then
             if hum.Health < CONFIG.HEALING_BELOW_HEALTH then
                 distanceToEngage = CONFIG.START_COMBAT
-                local healpad, healdist = nil, math.huge
-                for _,v in CONFIG.HEALING_PAD_POSITIONS do
-                    local dist = ((v - root.Position) * VEC3XZ).Magnitude
-                    if dist < healdist then
-                        healpad = v
-                        healdist = dist
-                    end
-                end
+                local healpad, healdist = GetNearestHealingPad(mePos)
                 if healpad then
-                    targetMove = healpad
+                    targetMove = healpad.Position
                     targetJump = true
                     DebugLines[6] = "BRAIN: I BETTER HEAL UP"
                 else
@@ -1812,7 +1859,6 @@ while true do
             end
         end
         
-        local mePos = root.Position
         local mePosGround = EnsureGround(mePos, true) or mePos
         
         -- Optimize GetNearestCharacter to only run every 0.2s
