@@ -1485,11 +1485,25 @@ local Playstyles = {
         local goingToR = victim.Velocity.Unit:Dot(vcf.RightVector)
         local swordDir = victimCF:VectorToWorldSpace(Vector3.new(1.5, 0, -1.2).Unit)
         local vdist = ((vpos - mePos) * VEC3XZ).Magnitude
-        targetJump = victim.Velocity.Y > 10
         
+        local victimChar = victim.Parent
+        local victimHum = victimChar and victimChar:FindFirstChildOfClass("Humanoid")
+        local opponentJumping = victim.Velocity.Y > 5 or (victimHum and (victimHum:GetState() == Enum.HumanoidStateType.Jumping or victimHum:GetState() == Enum.HumanoidStateType.Freefall))
+        local isVictimAbove = victim.Position.Y > mePos.Y + 2
+        targetJump = opponentJumping or isVictimAbove
+        
+        local victimHasTool = false
+        if victimChar then
+            for _, child in ipairs(victimChar:GetChildren()) do
+                if child:IsA("Tool") then
+                    victimHasTool = true
+                    break
+                end
+            end
+        end
+
         local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
-        if dist < 6 and victimLookingAtMe then
-            if math.random() < 0.3 then targetJump = true end
+        if dist < 6 and victimHasTool and victimLookingAtMe then
             local dodgeDir = math.random() > 0.5 and 5 or -5
             targetMove = mePosGround - vcf.LookVector * 3 + vcf.RightVector * dodgeDir
             if not CheckGround(targetMove) then
@@ -1530,12 +1544,6 @@ local Playstyles = {
                     DebugLines[7] = "PLAYSTYLE: CHARGING, RUNNING AWAY"
                 end
                 if charge then
-                    if vdist > CONFIG.CHARGE_NO_JUMP_DIST or goingTo > 0.8 then
-                        if os.clock() - chargeJump > 1 then
-                            chargeJump = os.clock()
-                            targetJump = true
-                        end
-                    end
                     targetMove = limbPos
                 end
             else
@@ -1546,23 +1554,15 @@ local Playstyles = {
                     DebugLines[7] = "PLAYSTYLE: CHARGING, COMING AT ME"
                 end
                 if charge then
-                    if vdist > 6 + goingTo * 4 and dist > 3 then
-                        targetJump = true
-                    end
                     targetMove = limbPos
                 end
             end
         else
             DebugLines[7] = "PLAYSTYLE: NON-MOVING TARGET"
-            if vdist > CONFIG.CHARGE_NO_JUMP_DIST or goingTo > 0.8 then
-                targetJump = true
-            end
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
         end
-        local isSpamJumping = victim.Velocity.Y > 12
-        local isVictimAbove = victim.Position.Y > mePos.Y + 2
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
-            targetJump = isSpamJumping or isVictimAbove
+            targetJump = opponentJumping or isVictimAbove
         end
         if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
@@ -1575,9 +1575,6 @@ local Playstyles = {
         if dist <= 5 then
             vpos = limbPos
         end
-        if dist < 14 and dist > 5.5 then
-            targetJump = true
-        end
         if dist < CONFIG.IMMEDIATE_ATTACK_RADIUS then
             charge = true
         end
@@ -1587,9 +1584,24 @@ local Playstyles = {
         local lookat = CFrame.lookAlong(Vector3.zero, (limbPos - root.Position) * VEC3XZ)
         local lookat2 = CFrame.lookAlong(Vector3.zero, (victim.Position - root.Position) * VEC3XZ)
         
+        local victimChar = victim.Parent
+        local victimHum = victimChar and victimChar:FindFirstChildOfClass("Humanoid")
+        local opponentJumping = victim.Velocity.Y > 5 or (victimHum and (victimHum:GetState() == Enum.HumanoidStateType.Jumping or victimHum:GetState() == Enum.HumanoidStateType.Freefall))
+        local isVictimAbove = victim.Position.Y > mePos.Y + 2
+        targetJump = opponentJumping or isVictimAbove
+        
+        local victimHasTool = false
+        if victimChar then
+            for _, child in ipairs(victimChar:GetChildren()) do
+                if child:IsA("Tool") then
+                    victimHasTool = true
+                    break
+                end
+            end
+        end
+        
         local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
-        if dist < 6 and victimLookingAtMe then
-            if math.random() < 0.3 then targetJump = true end
+        if dist < 6 and victimHasTool and victimLookingAtMe then
             local dodgeDir = math.random() > 0.5 and 5 or -5
             targetMove = mePosGround - lookat.LookVector * 3 + lookat.RightVector * dodgeDir
             if not CheckGround(targetMove) then
@@ -1597,7 +1609,6 @@ local Playstyles = {
             end
         elseif victim.Velocity.Magnitude > 0.2 and CheckWalkable(mePosGround, victimPos) then
             if charge then
-                targetJump = true
                 if currentDist >= 4 then
                     DebugLines[7] = "PLAYSTYLE: CHARGING WITH BIG STRAFE"
                     targetMove = limbPos
@@ -1621,10 +1632,8 @@ local Playstyles = {
             DebugLines[7] = "PLAYSTYLE: MY MOVE TARGET LEADS TO A CLIFF"
             targetMove = vpos + lookat:VectorToWorldSpace(Vector3.new(0, 0, 2))
         end
-        local isSpamJumping = victim.Velocity.Y > 12
-        local isVictimAbove = victim.Position.Y > mePos.Y + 2
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
-            targetJump = isSpamJumping or isVictimAbove
+            targetJump = opponentJumping or isVictimAbove
         end
         if dist < 8 + Player:GetNetworkPing() + CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
@@ -1653,28 +1662,38 @@ local Playstyles = {
             targetLookY = math.pi * 0.5
         end
         
+        local victimChar = victim.Parent
+        local victimHum = victimChar and victimChar:FindFirstChildOfClass("Humanoid")
+        local opponentJumping = victim.Velocity.Y > 5 or (victimHum and (victimHum:GetState() == Enum.HumanoidStateType.Jumping or victimHum:GetState() == Enum.HumanoidStateType.Freefall))
+        local isVictimAbove = victim.Position.Y > mePos.Y + 2
+        targetJump = opponentJumping or isVictimAbove
+        
+        local victimHasTool = false
+        if victimChar then
+            for _, child in ipairs(victimChar:GetChildren()) do
+                if child:IsA("Tool") then
+                    victimHasTool = true
+                    break
+                end
+            end
+        end
+        
         local victimLookingAtMe = victimCF.LookVector:Dot((mePos - victimPos).Unit) > 0.3
-        if dist < 6 and victimLookingAtMe then
-            if math.random() < 0.3 then targetJump = true end
+        if dist < 6 and victimHasTool and victimLookingAtMe then
             local dodgeDir = math.random() > 0.5 and 5 or -5
             targetMove = mePosGround - vcf.LookVector * 3 + vcf.RightVector * dodgeDir
             if not CheckGround(targetMove) then
                 targetMove = mePosGround - vcf.LookVector * 3
             end
         elseif charge then
-            if dist > CONFIG.CHARGE_NO_JUMP_DIST then
-                targetJump = true
-            end
             DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING..."
             targetMove = limbPos
         else
             DebugLines[7] = "PLAYSTYLE: CHARGING STRAFING TO NON MOVING..."
             targetMove = vpos + vcf:VectorToWorldSpace(Vector3.new(strafe2, 0, closest))
         end
-        local isSpamJumping = victim.Velocity.Y > 12
-        local isVictimAbove = victim.Position.Y > mePos.Y + 2
         if dist < CONFIG.CHARGE_NO_JUMP_DIST then
-            targetJump = isSpamJumping or isVictimAbove
+            targetJump = opponentJumping or isVictimAbove
         end
         if (hum:GetState() == Enum.HumanoidStateType.Running or targetJump) and dist < CONFIG.DIST_SWING or hitDist < 3 then
             useSword = true
