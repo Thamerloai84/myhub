@@ -27,6 +27,7 @@ Features:
  - Tool Mesh Scavenger (Finds and equips tools from workspace["Tool Meshes"])
  - Limb Targeting (Attacks closest limb first instead of the back to beat ping)
  - Dynamic Healing Pad Detection (Scans workspace["Healing Pads"] for TouchInterest)
+ - Tool Mesh Highlighting (Highlights nearest mesh when waiting for an opponent & checks pathfindability)
 
 ]]
 local CONFIG = {
@@ -308,6 +309,16 @@ DebugBrain.Adornee = DebugPart
 DebugBrain.AlwaysOnTop = true
 DebugBrain.Parent = DebugPart
 
+-- Tool Mesh Highlighter
+local ToolMeshHighlight = Instance.new("Highlight")
+ToolMeshHighlight.Name = "ToolMeshHighlight"
+ToolMeshHighlight.FillColor = Color3.fromRGB(0, 255, 0)
+ToolMeshHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+ToolMeshHighlight.FillTransparency = 0.5
+ToolMeshHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+ToolMeshHighlight.Enabled = false
+ToolMeshHighlight.Parent = workspace.Terrain
+
 local function DebugClear(wf)
     if not CONFIG.DEBUG then return end
     wf:Clear()
@@ -428,7 +439,7 @@ do
         if player == Player then
             player.CharacterAdded:Connect(function(character)
                 table.insert(Characters, character)
-            end)
+            })
             if player.Character then table.insert(Characters, player.Character) end
             return
         end
@@ -563,7 +574,7 @@ local function GetNearestToolMesh(pos)
             end
         end
     end
-    return nearest and nearest.Position
+    return nearest, nearest and nearest.Position
 end
 
 local function GetNearestHealingPad(pos)
@@ -1784,9 +1795,9 @@ while true do
         end
         local mePos = root.Position
         if not idlePosition then
-            local toolMeshPos = nil
+            local toolMeshPart, toolMeshPos = nil, nil
             if CONFIG.GRAB_TOOL_MESHES then
-                toolMeshPos = GetNearestToolMesh(mePos)
+                toolMeshPart, toolMeshPos = GetNearestToolMesh(mePos)
             end
             
             if toolMeshPos then
@@ -1858,6 +1869,30 @@ while true do
         if currentVictim then
             victim, dist = currentVictim, (currentVictim.Position - mePos).Magnitude
         end
+
+        -- Logic to check if waiting & saw opponent, and highlighting the mesh
+        local isAttacking = victim and dist and dist < CONFIG.START_COMBAT
+        local sawOpponent = currentVictim ~= nil
+
+        if sawOpponent and not isAttacking then
+            local nearestTool, nearestToolPos = GetNearestToolMesh(mePos)
+            if nearestTool then
+                ToolMeshHighlight.Adornee = nearestTool
+                ToolMeshHighlight.Enabled = true
+                -- Check pathfindability
+                local toolNode = ClosestNode(nearestToolPos)
+                if toolNode then
+                    ToolMeshHighlight.FillColor = Color3.fromRGB(0, 255, 0) -- Green: Can pathfind
+                else
+                    ToolMeshHighlight.FillColor = Color3.fromRGB(255, 0, 0) -- Red: Cannot pathfind yet
+                end
+            else
+                ToolMeshHighlight.Enabled = false
+            end
+        else
+            ToolMeshHighlight.Enabled = false
+        end
+
         if victim and dist then
             DebugLines[6] = "BRAIN: RED ALERT RED ALERT"
             idlePosition = nil
