@@ -311,13 +311,15 @@ DebugBrain.Parent = DebugPart
 
 -- Tool Mesh Highlighter
 local ToolMeshHighlight = Instance.new("Highlight")
-ToolMeshHighlight.Name = "ToolMeshHighlight"
-ToolMeshHighlight.FillColor = Color3.fromRGB(0, 255, 0)
-ToolMeshHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-ToolMeshHighlight.FillTransparency = 0.5
-ToolMeshHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-ToolMeshHighlight.Enabled = false
-ToolMeshHighlight.Parent = workspace.Terrain
+if ToolMeshHighlight then
+    ToolMeshHighlight.Name = "ToolMeshHighlight"
+    ToolMeshHighlight.FillColor = Color3.fromRGB(0, 255, 0)
+    ToolMeshHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    ToolMeshHighlight.FillTransparency = 0.5
+    ToolMeshHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    ToolMeshHighlight.Enabled = false
+    ToolMeshHighlight.Parent = workspace.Terrain
+end
 
 local function DebugClear(wf)
     if not CONFIG.DEBUG then return end
@@ -561,20 +563,30 @@ local function IsTruss(part)
     return false
 end
 
+-- Safely rewritten GetNearestToolMesh
 local function GetNearestToolMesh(pos)
     local meshesFolder = workspace:FindFirstChild("Tool Meshes")
-    if not meshesFolder then return nil end
-    local nearest, nearestDist = nil, math.huge
-    for _, part in ipairs(meshesFolder:GetDescendants()) do
+    if not meshesFolder then return nil, nil end
+    
+    local nearestPart = nil
+    local nearestDist = math.huge
+    
+    local descendants = meshesFolder:GetDescendants()
+    for _, part in ipairs(descendants) do
         if part:IsA("BasePart") then
             local dist = ((part.Position - pos) * VEC3XZ).Magnitude
             if dist < nearestDist then
                 nearestDist = dist
-                nearest = part
+                nearestPart = part
             end
         end
     end
-    return nearest, nearest and nearest.Position
+    
+    if nearestPart then
+        return nearestPart, nearestPart.Position
+    end
+    
+    return nil, nil
 end
 
 local function GetNearestHealingPad(pos)
@@ -1874,7 +1886,7 @@ while true do
         local isAttacking = victim and dist and dist < CONFIG.START_COMBAT
         local sawOpponent = currentVictim ~= nil
 
-        if sawOpponent and not isAttacking then
+        if sawOpponent and not isAttacking and ToolMeshHighlight then
             local nearestTool, nearestToolPos = GetNearestToolMesh(mePos)
             if nearestTool then
                 ToolMeshHighlight.Adornee = nearestTool
@@ -1890,7 +1902,9 @@ while true do
                 ToolMeshHighlight.Enabled = false
             end
         else
-            ToolMeshHighlight.Enabled = false
+            if ToolMeshHighlight then
+                ToolMeshHighlight.Enabled = false
+            end
         end
 
         if victim and dist then
