@@ -2,7 +2,7 @@
 
 ## Usage
 
-pls runm this in your executor:
+Run this in your executor:
 
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Thamerloai84/myownrepo/refs/heads/main/code.lua"))()
